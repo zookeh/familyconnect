@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Family Tree</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #d8d8d8;
+            color: #2e3440; /* Nord0 */
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: auto;
+        }
+
+        .container {
+            display: flex;
+            flex: 1;
+        }
+
+        .sidebar,
+        .info-panel {
+            width: 250px;
+            padding: 20px;
+            background-color: #3b4252; /* Nord3 */
+            color: #d8dee9; /* Nord4 */
+            text-align: left;
+            flex-shrink: 0;
+            height: auto;
+            border-radius: 10px;
+            margin: 10px;
+        }
+
+        .tree-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: auto;
+            background-color: #434c5e; /* Nord2 */
+            margin: 10px;
+            border-radius: 10px;
+        }
+
+        .person-group {
+            cursor: pointer;
+        }
+
+        .person {
+            fill: #88c0d0; /* Nord10 */
+            stroke: #4c566a; /* Nord4 */
+        }
+
+        .spouse {
+            fill: #88c0d0; /* Nord10 */
+            stroke: #4c566a; /* Nord4 */
+        }
+
+        .person-text,
+        .spouse-text {
+            fill: #2e3440; /* Nord0 */
+            font-size: 14px;
+            font-family: Arial, sans-serif;
+            dominant-baseline: middle;
+            text-anchor: middle;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .link {
+            fill: none;
+            stroke: #88c0d0; /* Nord10 */
+            stroke-width: 2px;
+        }
+
+        .spouse-link {
+            fill: none;
+            stroke: #a3be8c; /* Nord14 */
+            stroke-width: 2px;
+        }
+
+        .menu {
+            display: none;
+            background: #3b4252; /* Nord3 */
+            padding: 10px;
+            border: 2px solid #88c0d0; /* Nord10 */
+            border-radius: 5px;
+            position: absolute;
+        }
+
+        button {
+            display: block;
+            margin: 10px 0;
+            padding: 8px;
+            width: 100%;
+            background-color: #88c0d0; /* Nord10 */
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+            color: #2e3440; /* Nord0 */
+            font-weight: bold;
+        }
+
+        button:hover {
+            background-color: #81a1c1; /* Nord9 */
+            color: #eceff4; /* Nord6 */
+        }
+
+        .info-container {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .load-trees-section {
+            margin-top: 20px;
+            border-top: 1px solid #88c0d0; /* Nord10 */
+            padding-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <button onclick="addMainRelative()">Add Main Relative</button>
+            <button onclick="removeRelative()">Remove Relative</button>
+            <button onclick="editRelative()">Edit Relative</button>
+            <button onclick="saveToFile()">Save to File</button>
+            <div class="load-trees-section">
+                <h3>Load Family Tree</h3>
+                <div id="saved-trees-buttons"></div>
+            </div>
+        </div>
+
+        <div class="tree-container">
+            <svg id="family-tree-svg" width="1200" height="800"></svg>
+        </div>
+
+        <div class="info-panel" id="info-panel">
+            Click on a person to see details
+        </div>
+    </div>
+
+    <script>
+        let selectedPerson = null;
+        let familyData = null; // Start with no data
+        const nodeWidthPadding = 20;
+        const nodeHeightPadding = 10;
+        const spouseSpacing = 20;
+
+        function saveToFile() {
+            if (!familyData) {
+                alert("No family data to save.");
+                return;
+            }
+
+            fetch("http://localhost:3000/save", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ data: familyData }), // Only send the data
+            })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then((data) => {
+                if (data.success) {
+                    alert(`Family tree saved successfully as "${data.filename}"!`);
+                } else {
+                    alert("Error saving file: " + data.error);
+                }
+            })
+            .catch((err) => {
+                alert("Error saving file: " + err.message);
+                console.error("Error saving file:", err);
+            });
+        }
+
+        function loadFamilyTree(filename) {
+            fetch(`http://localhost:3000/load?filename=${filename}`)
+                .then((response) => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then((data) => {
+                    familyData = data;
+                    renderTree();
+                    alert(`Family tree "${filename}" loaded successfully!`);
+                })
+                .catch((error) => {
+                    alert("Error loading family tree: " + error);
+                    console.error("Error loading family tree:", error);
+                });
+        }
+
+        function addSpousePrompt() {
+            console.log("addSpousePrompt called");
+            if (!selectedPerson) return;
+            let name = prompt("Enter spouse's name:");
+            let address = prompt("Enter address:");
+            let phone = prompt("Enter phone number:");
+            if (!name) return;
+            selectedPerson.data.spouse = { name, address, phone };
+            renderTree();
+        }
+
+        function addChildPrompt() {
+            console.log("addChildPrompt called");
+            if (!selectedPerson) return;
+            let name = prompt("Enter child's name:");
+            let address = prompt("Enter address:");
+            let phone = prompt("Enter phone number:");
+            if (!name) return;
+            if (!selectedPerson.data.children) {
+                selectedPerson.data.children = [];
+            }
+            selectedPerson.data.children.push({
+                name,
+                address,
+                phone,
+                children: [],
+            });
+            renderTree();
+        }
+
+        function loadSavedTrees() {
+            fetch("http://localhost:3000/list-files")
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(files => {
+                    const buttonsContainer = document.getElementById("saved-trees-buttons");
+                    buttonsContainer.innerHTML = ""; // Clear previous buttons
+                    if (files.length === 0) {
+                        buttonsContainer.innerHTML = "<p>No saved family trees found.</p>";
+                        return;
+                    }
+                    files.forEach(file => {
+                        const button = document.createElement("button");
+                        button.textContent = file;
+                        button.onclick = () => loadFamilyTree(file);
+                        buttonsContainer.appendChild(button);
+                    });
+                })
+                .catch(error => {
+                    console.error("Error loading saved trees:", error);
+                    const buttonsContainer = document.getElementById("saved-trees-buttons");
+                    buttonsContainer.innerHTML = "<p>Error loading saved trees. Please try again.</p>";
+                });
+        }
+
+        function loadFromJSON() {
+            renderTree(); // Render an empty tree initially
+        }
+
+        // Load the list of saved trees when the page loads
+        window.onload = () => {
+            loadFromJSON(); // Keep this to render an initial empty tree if no data is loaded
+            loadSavedTrees();
+        };
+
+        function renderTree() {
+            console.log("renderTree called");
+            const svg = d3.select("#family-tree-svg");
+            svg.selectAll("*").remove();
+            const width = +svg.attr("width");
+            const height = +svg.attr("height");
+            const margin = { top: 50, right: 50, bottom: 50, left: 50 };
+            const innerWidth = width - margin.left - margin.right;
+            const innerHeight = height - margin.top - margin.bottom;
+
+            const g = svg
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            if (familyData) {
+                const treeLayout = d3.tree().size([innerWidth, innerHeight / 2]);
+                const root = d3.hierarchy(familyData);
+                treeLayout(root);
+
+                const links = root.links();
+                const nodes = root.descendants();
+
+                // Draw links
+                g.selectAll(".link")
+                    .data(links)
+                    .enter()
+                    .append("path")
+                    .attr("class", "link")
+                    .attr(
+                        "d",
+                        d3
+                            .linkHorizontal()
+                            .x((d) => d.x)
+                            .y((d) => d.y),
+                    );
+
+                // Draw nodes
+                const node = g
+                    .selectAll(".node")
+                    .data(nodes)
+                    .enter()
+                    .append("g")
+                    .attr("class", "node")
+                    .attr("transform", (d) => `translate(${d.x},${d.y})`)
+                    .on("click", (event, d) => selectPerson(event, d));
+
+                node.each(function (d) {
+                    const group = d3.select(this);
+                    const name = d.data.name;
+                    const text = group
+                        .append("text")
+                        .attr("class", "person-text")
+                        .text(name)
+                        .on("click", function (event) {
+                            // Ensure text click triggers same action as clicking behind
+                            selectPerson(event, d);
+                        });
+
+                    const bbox = text.node().getBBox();
+                    const rectWidth = bbox.width + nodeWidthPadding;
+                    const rectHeight = bbox.height + nodeHeightPadding;
+                    const rectX = -rectWidth / 2;
+                    const rectY = -rectHeight / 2;
+
+                    group
+                        .insert("rect", ":first-child")
+                        .attr("class", "person")
+                        .attr("width", rectWidth)
+                        .attr("height", rectHeight)
+                        .attr("x", rectX)
+                        .attr("y", rectY)
+                        .on("click", (event, d) => selectPerson(event, d));
+
+                    if (d.data.spouse) {
+                        const spouseData = d.data.spouse;
+                        // Create spouse rect first
+                        const spouseRectWidth = Math.max(
+                            d.data.spouse.name.length * 10,
+                            100,
+                        );
+                        const spouseRectHeight = 30;
+                        const spouseRectX = rectWidth / 2 + spouseSpacing;
+                        const spouseRectY = -spouseRectHeight / 2;
+
+                        group
+                            .append("rect")
+                            .attr("class", "spouse")
+                            .attr("width", spouseRectWidth)
+                            .attr("height", spouseRectHeight)
+                            .attr("x", spouseRectX)
+                            .attr("y", spouseRectY)
+                            .on("click", (event) => {
+                                const spouseNode = { data: spouseData };
+                                selectPerson(event, spouseNode);
+                            });
+
+                        // Add spouse text on top of rect
+                        group
+                            .append("text")
+                            .attr("class", "spouse-text")
+                            .text(spouseData.name)
+                            .attr("x", spouseRectX + spouseRectWidth / 2)
+                            .attr("y", 0)
+                            .on("click", function (event) {
+                                const spouseNode = { data: spouseData };
+                                selectPerson(event, spouseNode);
+                            });
+
+                        // Draw line connecting spouse
+                        group
+                            .append("line")
+                            .attr("class", "spouse-link")
+                            .attr("x1", rectWidth / 2)
+                            .attr("y1", 0)
+                            .attr("x2", spouseRectX)
+                            .attr("y2", 0);
+                    }
+
+                    text
+                        .attr("x", rectX + rectWidth / 2)
+                        .attr("y", rectY + rectHeight / 2);
+                });
+
+                // Adjust SVG height based on content for vertical layout
+                const maxY = d3.max(nodes, (d) => d.x);
+                const totalHeightNeeded = maxY + margin.bottom + 100;
+                svg.attr("height", Math.max(height, totalHeightNeeded));
+            } else {
+                // Optionally display a message if no main relative has been added
+                g.append("text")
+                    .attr("x", innerWidth / 2)
+                    .attr("y", innerHeight / 2)
+                    .attr("text-anchor", "middle")
+                    .attr("fill", "#D8DEE9")
+                    .text("Click 'Add Main Relative' to start.");
+            }
+        }
+
+        function selectPerson(event, d) {
+            console.log("selectPerson called with:", d);
+            selectedPerson = d;
+            let infoHTML = `<strong>${d.data.name}</strong><br>`;
+            if (d.data.address) infoHTML += `Address: ${d.data.address}<br>`;
+            if (d.data.phone) infoHTML += `Phone: ${d.data.phone}<br><br>`;
+            infoHTML += `
+                                <button onclick="addSpousePrompt()">Add Spouse</button>
+                                <button onclick="addChildPrompt()">Add Child</button>
+                            `;
+            document.getElementById("info-panel").innerHTML = infoHTML;
+        }
+
+        function addMainRelative() {
+            console.log("addMainRelative called");
+            let name = prompt("Enter main relative's name:");
+            let address = prompt("Enter address:");
+            let phone = prompt("Enter phone number:");
+            if (!name) return;
+            familyData = { name, address, phone, children: [] };
+            renderTree();
+        }
+
+        function addRelative() {
+            console.log("addRelative called");
+            if (!familyData) {
+                alert("Please add the main relative first.");
+                return;
+            }
+            let name = prompt("Enter relative's name:");
+            let address = prompt("Enter address:");
+            let phone = prompt("Enter phone number:");
+            if (!name) return;
+            familyData.children.push({ name, address, phone, children: [] });
+            renderTree();
+        }
+
+        function removeRelative() {
+            console.log("removeRelative called");
+            if (!selectedPerson) return;
+            // Find the parent and remove the selected person
+            function removeNode(node, targetName) {
+                if (node.children) {
+                    node.children = node.children.filter(
+                        (child) => child.name !== targetName
+                    );
+                    node.children.forEach((child) => removeNode(child, targetName));
+                }
+                if (node.spouse && node.spouse.name === targetName) {
+                    delete node.spouse;
+                }
+            }
+            if (familyData && familyData.name === selectedPerson.data.name) {
+                familyData = null; // Removing the main relative
+            } else if (familyData) {
+                familyData.children = familyData.children.filter(
+                    (child) => child.name !== selectedPerson.data.name
+                );
+                familyData.children.forEach((child) =>
+                    removeNode(child, selectedPerson.data.name)
+                );
+            }
+            renderTree();
+        }
+
+        function editRelative() {
+            console.log("editRelative called");
+            if (!selectedPerson) return;
+            let name = prompt("Edit name:", selectedPerson.data.name);
+            let address = prompt(
+                "Edit address:",
+                selectedPerson.data.address || "",
+            );
+            let phone = prompt("Edit phone:", selectedPerson.data.phone || "");
+            if (name) {
+                selectedPerson.data.name = name;
+                selectedPerson.data.address = address;
+                selectedPerson.data.phone = phone;
+                renderTree();
+            }
+        }
+    </script>
+</body>
+</html>
